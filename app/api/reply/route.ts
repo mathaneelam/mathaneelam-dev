@@ -82,8 +82,8 @@ export async function POST(req: Request) {
       ended: reply.ended || callerTurns >= LIMITS.maxTurnsPerCall,
       ...(debug && {
         debug: {
-          geminiKeyPresent: Boolean(process.env.GEMINI_API_KEY),
-          model: process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash (default)",
+          sarvamKeyPresent: Boolean(process.env.SARVAM_API_KEY),
+          model: process.env.SARVAM_MODEL?.trim() || "sarvam-105b-conversations (default)",
           whyNotLive: diagnostics.lastReason,
         },
       }),

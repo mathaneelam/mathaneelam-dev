@@ -1,10 +1,10 @@
 /* ============================================================================
- *  KEY CHECKER
+ *  KEY CHECKER  —  npm run check-keys
  *
- *      npm run check-keys
+ *  Tells you whether your Sarvam key actually works, for both the
+ *  conversation and the voice, before you rely on it.
  *
- *  Tells you whether each key actually works, before you rely on it.
- *  It never prints a key, so this is safe to run and safe to screenshot.
+ *  It never prints the key, so this is safe to run and safe to screenshot.
  * ========================================================================== */
 
 import { readFile } from "node:fs/promises";
@@ -29,147 +29,85 @@ const ok = (m) => console.log(`  ✓ ${m}`);
 const bad = (m) => console.log(`  ✗ ${m}`);
 const info = (m) => console.log(`    ${m}`);
 
-async function checkGemini() {
-  console.log("\nSTEP 1 — the demo's brain (Gemini)");
-  const key = process.env.GEMINI_API_KEY;
-
-  if (!key) {
-    bad("No key set yet.");
-    info("Get one at https://aistudio.google.com/apikey and paste it into");
-    info(".env.local after GEMINI_API_KEY=");
-    info("Until then the demo answers from its script, which still works.");
-    return;
-  }
-  // Google issues two formats: the older "AIza..." and the newer "AQ....".
-  // Only flag the obvious mix-up — an ElevenLabs key on the Gemini line.
-  if (key.startsWith("sk_")) {
-    bad("That is an ElevenLabs key, not a Google one.");
-    info("It belongs on the ELEVENLABS_API_KEY line instead.");
-    return;
-  }
-
-  // `||` not `??` — a blank env var is "" and must fall back. See lib/brain.ts.
-  const model = process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash";
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-goog-api-key": key },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: "Reply with the single word: ready" }] }],
-          generationConfig: { maxOutputTokens: 50, thinkingConfig: { thinkingBudget: 0 } },
-        }),
-        signal: AbortSignal.timeout(15000),
-      },
-    );
-
-    if (res.status === 400 || res.status === 403) {
-      bad("The key was rejected by Google.");
-      info("Check you copied the whole thing, with no spaces.");
-      return;
-    }
-    if (res.status === 404) {
-      bad(`Google does not know the model "${model}".`);
-      info("Remove the GEMINI_MODEL line from .env.local to use the default.");
-      return;
-    }
-    if (res.status === 429) {
-      ok("Key is valid.");
-      info("You have hit today's free limit. It resets tomorrow.");
-      return;
-    }
-    if (!res.ok) {
-      bad(`Google replied ${res.status}. Try again in a minute.`);
-      return;
-    }
-
-    const data = await res.json();
-    const said = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-    ok(`Working. Gemini replied: "${said ?? "(empty)"}"`);
-    info(`Model: ${model}`);
-    info("Your demo now uses real AI. Restart `npm run dev` to pick it up.");
-  } catch {
-    bad("Could not reach Google. Check your internet connection.");
-  }
-}
-
-async function checkElevenLabs() {
-  console.log("\nSTEP 2 — the recorded voices (ElevenLabs)");
-  const key = process.env.ELEVENLABS_API_KEY;
-  const voice = process.env.ELEVENLABS_VOICE_ID;
-
-  if (!key) {
-    bad("No key set yet.");
-    info("Optional. Without it the demo uses the visitor's own phone voice.");
-    info("Get one at https://elevenlabs.io → profile icon → API Keys");
-    return;
-  }
-
-  try {
-    const res = await fetch("https://api.elevenlabs.io/v1/user/subscription", {
-      headers: { "xi-api-key": key },
-      signal: AbortSignal.timeout(15000),
-    });
-
-    if (res.status === 401) {
-      const body = await res.text();
-      if (body.includes("missing the permission")) {
-        bad("The key works, but was created with no permissions.");
-        info("On elevenlabs.io → API Keys → edit your key, and switch on");
-        info("'Text to Speech', 'Voices: read' and 'User: read'.");
-      } else {
-        bad("The key was rejected. Check you copied the whole thing.");
-      }
-      info("");
-      info("Worth knowing before you spend time on this: ElevenLabs' FREE");
-      info("plan cannot use their voices through the API at all — it returns");
-      info("'paid_plan_required'. Recording the clips needs a paid plan.");
-      info("Without it the demo uses the visitor's own phone voice, free.");
-      return;
-    }
-    if (!res.ok) {
-      bad(`ElevenLabs replied ${res.status}.`);
-      return;
-    }
-
-    const sub = await res.json();
-    const used = sub.character_count ?? 0;
-    const limit = sub.character_limit ?? 0;
-    const left = limit - used;
-
-    ok("Key is working.");
-    info(`Allowance: ${left.toLocaleString()} of ${limit.toLocaleString()} characters left.`);
-
-    if (left < 5297) {
-      info(`You need 5,297 to record everything. Not enough left this month.`);
-    } else {
-      info("That is enough to record all 63 lines (5,297 characters).");
-    }
-
-    if (!voice) {
-      bad("No ELEVENLABS_VOICE_ID set — needed before recording.");
-      const vres = await fetch("https://api.elevenlabs.io/v1/voices", {
-        headers: { "xi-api-key": key },
-      });
-      if (vres.ok) {
-        const { voices = [] } = await vres.json();
-        info("\n    Voices on your account — copy one of these IDs:");
-        for (const v of voices.slice(0, 12)) {
-          info(`      ${v.voice_id}   ${v.name}`);
-        }
-      }
-      return;
-    }
-
-    ok(`Voice ID set. Ready — run: npm run voice`);
-  } catch {
-    bad("Could not reach ElevenLabs. Check your internet connection.");
-  }
-}
-
 await loadEnv();
-console.log("Checking your keys. Nothing here is printed to screen or saved.");
-await checkGemini();
-await checkElevenLabs();
+
+const key = process.env.SARVAM_API_KEY;
+// `||` not `??` — a variable created in a dashboard and left blank is "".
+const model = process.env.SARVAM_MODEL?.trim() || "sarvam-105b-conversations";
+
+console.log("Checking your key. Nothing here is printed to screen or saved.\n");
+
+if (!key) {
+  bad("No SARVAM_API_KEY set.");
+  info("Get one at https://sarvam.ai and put it in .env.local");
+  info("Without it the demo answers from a script, which still works.");
+  process.exit(0);
+}
+
+/* ------------------------------------------------------- 1. the conversation */
+console.log("THE CONVERSATION");
+try {
+  const r = await fetch("https://api.sarvam.ai/v1/chat/completions", {
+    method: "POST",
+    headers: { "api-subscription-key": key, "content-type": "application/json" },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "user", content: "Reply with the single word: ready" }],
+      max_tokens: 20,
+    }),
+    signal: AbortSignal.timeout(20000),
+  });
+
+  if (r.status === 401 || r.status === 403) {
+    bad("The key was rejected. Check you copied the whole thing.");
+  } else if (r.status === 429) {
+    ok("Key is valid, but you have hit the rate limit. Try again shortly.");
+  } else if (!r.ok) {
+    const body = await r.text();
+    bad(`Sarvam replied ${r.status}.`);
+    info(body.slice(0, 200).replace(/\s+/g, " "));
+  } else {
+    const d = await r.json();
+    ok(`Working. Replied: "${d?.choices?.[0]?.message?.content?.trim() ?? "(empty)"}"`);
+    info(`Model: ${model}`);
+  }
+} catch {
+  bad("Could not reach Sarvam. Check your internet connection.");
+}
+
+/* ------------------------------------------------------------- 2. the voice */
+console.log("\nTHE VOICE");
+try {
+  const t0 = Date.now();
+  const r = await fetch("https://api.sarvam.ai/text-to-speech", {
+    method: "POST",
+    headers: { "api-subscription-key": key, "content-type": "application/json" },
+    body: JSON.stringify({
+      text: "வணக்கம்",
+      target_language_code: "ta-IN",
+      speaker: "priya",
+      model: "bulbul:v3",
+      output_audio_codec: "mp3",
+    }),
+    signal: AbortSignal.timeout(30000),
+  });
+  const ms = Date.now() - t0;
+
+  if (!r.ok) {
+    bad(`Sarvam replied ${r.status}.`);
+    info((await r.text()).slice(0, 200).replace(/\s+/g, " "));
+  } else {
+    const d = await r.json();
+    const bytes = d?.audios?.[0] ? Buffer.from(d.audios[0], "base64").length : 0;
+    if (!bytes) bad("No audio came back.");
+    else {
+      ok(`Working. Spoke Tamil in ${ms}ms (${(bytes / 1024).toFixed(0)}KB).`);
+      info("This is what lets Tamil play on a PC or an iPhone, neither of");
+      info("which can install a Tamil voice of its own.");
+    }
+  }
+} catch {
+  bad("Could not reach Sarvam text-to-speech.");
+}
+
 console.log("");

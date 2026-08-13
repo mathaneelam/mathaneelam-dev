@@ -3,7 +3,7 @@
  *
  *  One function, `generateReply`, with two implementations behind it:
  *
- *    1. Gemini      - real AI, free tier, used when GEMINI_API_KEY is set.
+ *    1. Sarvam      - real AI, used whenever SARVAM_API_KEY is set.
  *    2. Scripted    - a keyword-matched conversation that needs no key,
  *                     no network and no quota. It can never fail.
  *
@@ -33,7 +33,7 @@ export interface ReplyResult {
   /** Clip id when the reply matches a recorded line, so it plays instantly. */
   clip?: string;
   /** Which path answered - shown nowhere, used for debugging and logging. */
-  source: "gemini" | "scripted";
+  source: "sarvam" | "scripted";
   /** True when the receptionist has wrapped the call up. */
   ended?: boolean;
 }
@@ -131,30 +131,29 @@ export function scriptedReply(
 }
 
 /* --------------------------------------------------------------------------
- * GEMINI PATH
+ * SARVAM PATH
  *
  * Uses the REST endpoint directly rather than the SDK - it is one fetch, and
  * it keeps the dependency list (and therefore the install and cold start)
  * smaller. Model id is configurable so it can be changed without a code edit.
  * ------------------------------------------------------------------------ */
 
-/* Verified against a live free-tier key on 2026-08-13.
+/* Verified against a live key on 2026-08-13: an unscripted Tamil question was
+ * answered in 1.7s, in natural spoken Tamil, correctly using the given facts.
  *
- * Two things to know if you ever change this:
- *   - gemini-2.5-flash is retired for new accounts and returns 404.
- *   - Gemini 3.x models think by default, and thinking tokens are charged
- *     against maxOutputTokens. Left on, a 120-token budget gets eaten by
- *     thinking and the caller receives a half-finished sentence. A
- *     receptionist does not need to deliberate, so it is switched off below —
- *     which also takes the reply from ~23s down to ~1.2s. */
-/* `||` and .trim(), deliberately, NOT `??`. An env var that exists but is
+ * Two things to know if you change the model:
+ *   - `sarvam-m` is deprecated and returns 400.
+ *   - plain `sarvam-105b` returns a response shape this code does not read.
+ *     The `-conversations` variant is the one tuned for dialogue.
+ *
+ * `||` with .trim(), deliberately, NOT `??`. An env var that exists but is
  * blank — which is what you get from creating the variable in a dashboard and
  * leaving the value empty — is `""`, and `??` would happily accept it. That
- * produced a request to `models/:generateContent`, a 404, and a silent
- * fallback to the script with no visible symptom. */
-const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash";
+ * exact mistake previously sent an empty model name upstream and produced a
+ * silent fallback to the script with no visible symptom. */
+const SARVAM_MODEL = process.env.SARVAM_MODEL?.trim() || "sarvam-105b-conversations";
 
-async function geminiReply(
+async function sarvamReply(
   industry: IndustryId,
   language: LanguageCode,
   history: Turn[],
@@ -164,44 +163,41 @@ async function geminiReply(
   const lang = getLanguage(language);
   const system = buildSystemPrompt(persona, lang.english);
 
-  const contents = history.length
-    ? history.map((t) => ({
-        role: t.role === "caller" ? "user" : "model",
-        parts: [{ text: t.text }],
-      }))
-    : [{ role: "user", parts: [{ text: "(the caller has just connected)" }] }];
+  const messages: { role: string; content: string }[] = [
+    { role: "system", content: system },
+    ...history.map((t) => ({
+      role: t.role === "caller" ? "user" : "assistant",
+      content: t.text,
+    })),
+  ];
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
-      body: JSON.stringify({
-        contents,
-        systemInstruction: { parts: [{ text: system }] },
-        generationConfig: {
-          // A receptionist is brief. This is also the main cost control.
-          maxOutputTokens: 200,
-          temperature: 0.7,
-          // See the note on GEMINI_MODEL above - without this the reply
-          // arrives truncated and slow.
-          thinkingConfig: { thinkingBudget: 0 },
-        },
-      }),
-      // Never let a slow upstream hold the caller waiting.
-      signal: AbortSignal.timeout(8000),
-    },
-  );
+  // On the opening turn there is nothing to answer yet, so prompt her to pick
+  // up rather than sending a conversation with no user message in it.
+  if (!history.length) {
+    messages.push({ role: "user", content: "(the caller has just connected)" });
+  }
 
-  if (!res.ok) throw new Error(`gemini ${res.status}`);
+  const res = await fetch("https://api.sarvam.ai/v1/chat/completions", {
+    method: "POST",
+    headers: { "api-subscription-key": apiKey, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: SARVAM_MODEL,
+      messages,
+      // A receptionist is brief. This is also the main cost control.
+      max_tokens: 200,
+      temperature: 0.7,
+    }),
+    // Never let a slow upstream hold the caller waiting in silence.
+    signal: AbortSignal.timeout(9000),
+  });
+
+  if (!res.ok) throw new Error(`sarvam ${res.status}`);
 
   const data = await res.json();
-  const text: string | undefined =
-    data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text).join("").trim();
+  const text: string | undefined = data?.choices?.[0]?.message?.content?.trim();
+  if (!text) throw new Error("sarvam returned nothing");
 
-  if (!text) throw new Error("gemini returned nothing");
-
-  return { text, source: "gemini" };
+  return { text, source: "sarvam" };
 }
 
 /* --------------------------------------------------------------------------
@@ -226,14 +222,14 @@ export async function generateReply(
   history: Turn[],
   opts: { allowLive: boolean },
 ): Promise<ReplyResult> {
-  const key = process.env.GEMINI_API_KEY;
+  const key = process.env.SARVAM_API_KEY;
 
-  if (!key) diagnostics.lastReason = "no GEMINI_API_KEY in this build";
+  if (!key) diagnostics.lastReason = "no SARVAM_API_KEY in this build";
   else if (!opts.allowLive) diagnostics.lastReason = "live disabled (turn or daily cap reached)";
 
   if (opts.allowLive && key) {
     try {
-      const live = await geminiReply(industry, language, history, key);
+      const live = await sarvamReply(industry, language, history, key);
       diagnostics.lastReason = null;
       // If the live reply happens to match a recorded line, play the recording.
       const persona = getPersona(industry);
@@ -247,7 +243,7 @@ export async function generateReply(
       // Fall through. A visitor should never see an error where a
       // receptionist should be — but record why, so `?debug=1` can say.
       diagnostics.lastReason =
-        err instanceof Error ? `gemini call failed: ${err.message}` : "gemini call failed";
+        err instanceof Error ? `sarvam call failed: ${err.message}` : "sarvam call failed";
     }
   }
 
