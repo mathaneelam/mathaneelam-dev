@@ -3,9 +3,12 @@
  *
  *  Four levels, tried in order. The demo completes at every one of them:
  *
- *    1. A recorded clip   - instant, free, best quality (ta / hi / en)
- *    2. The phone's voice - free, unlimited, any Indian language
- *    3. Silent            - transcript only, the call still works
+ *    1. Sarvam, server-side - every Indian language, on every device
+ *    2. The phone's voice   - only where the OS has that language installed
+ *    3. Silent              - transcript only, the call still completes
+ *
+ *  Nothing is pre-recorded. Level 1 is what makes Tamil work on a Windows PC
+ *  or an iPhone, neither of which has a Tamil voice to fall back on.
  *
  *  Mobile browsers refuse to play audio until the visitor has tapped
  *  something, so `unlock()` must be called from inside the tap handler on the
@@ -19,10 +22,6 @@ import type { IndustryId } from "./personas";
 let unlocked = false;
 let current: HTMLAudioElement | null = null;
 
-/* Clips that are not on the server. Until `npm run voice` has been run,
- * public/voice is empty and EVERY line misses — so without remembering the
- * misses, each reply pays the lookup wait again before she says anything. */
-const missingClips = new Set<string>();
 
 /** Call this synchronously inside a click/tap handler, once per session. */
 export function unlock(): void {
@@ -70,24 +69,10 @@ export async function speak(
   cancelSpeech();
   const finish = () => opts.onEnd?.();
 
-  // -------------------------------------------------- 1. recorded clip
-  if (opts.clip) {
-    const src = `/voice/${opts.language}/${opts.industry}/${opts.clip}.wav`;
-    if (!missingClips.has(src)) {
-      const played = await playClip(src, opts.onStart);
-      if (played) {
-        finish();
-        return;
-      }
-      missingClips.add(src);
-    }
-    // No clip on disk yet - fall through to the phone's own voice.
-  }
-
-  // ------------------------------------------------- 2. server-generated
-  // The important level. The browser can only use voices installed in the
-  // operating system, and Windows has none for Tamil — so on a PC this is the
-  // only thing that can actually say it.
+  // ------------------------------------------------- 1. server-generated
+  // The browser can only use voices installed in the operating system, and
+  // Windows has none for Tamil — so on a PC this is the only thing that can
+  // actually say it. Everything is generated live; nothing is pre-recorded.
   const server = await speakFromServer(text, opts.language, opts.onStart);
   if (server) {
     finish();
