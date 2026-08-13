@@ -72,7 +72,7 @@ export async function speak(
 
   // -------------------------------------------------- 1. recorded clip
   if (opts.clip) {
-    const src = `/voice/${opts.language}/${opts.industry}/${opts.clip}.mp3`;
+    const src = `/voice/${opts.language}/${opts.industry}/${opts.clip}.wav`;
     if (!missingClips.has(src)) {
       const played = await playClip(src, opts.onStart);
       if (played) {
