@@ -75,6 +75,12 @@ export default function VoiceDemo() {
   const busyRef = useRef(false);
   const beginListeningRef = useRef<() => void>(() => {});
 
+  /* Barge-in. The mic stays open while she talks so the caller can cut in,
+   * which means it also hears her. `spokenRef` holds what she is currently
+   * saying so her own words can be recognised and ignored. */
+  const spokenRef = useRef("");
+  const speakingRef = useRef(false);
+
   /* Capability detection runs in the browser only, after mount, so the
      server-rendered HTML is identical for everyone. */
   /* Which languages this particular device can actually SAY.
@@ -159,18 +165,28 @@ export default function VoiceDemo() {
 
       setTurns((t) => [...t, { role: "agent", text: reply.text }]);
 
-      // Stop listening while she talks, so the mic does not hear her.
+      /* The mic deliberately stays open here. Muting it would make her
+         impossible to interrupt, which is the single most unnatural thing a
+         voice agent can do. Her own words are filtered out in onresult. */
       busyRef.current = true;
-      recognitionRef.current?.abort();
+      spokenRef.current = reply.text;
+      speakingRef.current = true;
 
       await speak(reply.text, {
         clip: reply.clip,
         industry,
         language,
-        onStart: () => setSpeaking(true),
+        onStart: () => {
+          setSpeaking(true);
+          // Open the mic as she starts, so she can be cut off from the very
+          // first word rather than only once she has finished.
+          if (handsFreeRef.current) beginListeningRef.current();
+        },
         onEnd: () => setSpeaking(false),
       });
 
+      speakingRef.current = false;
+      spokenRef.current = "";
       busyRef.current = false;
 
       if (reply.ended) {
@@ -225,8 +241,8 @@ export default function VoiceDemo() {
    * Every failure path says something. A microphone button that silently does
    * nothing when permission is blocked is worse than no button at all. */
   const beginListening = useCallback(() => {
-    // Never listen while she is talking, or it hears itself.
-    if (busyRef.current || !callLiveRef.current) return;
+    // Listening continues while she talks — that is what allows barge-in.
+    if (!callLiveRef.current) return;
 
     const Ctor =
       (window as unknown as { SpeechRecognition?: typeof SpeechRecognition })
@@ -257,6 +273,22 @@ export default function VoiceDemo() {
         if (e.results[i].isFinal) final += text;
         else interim += text;
       }
+
+      /* While she is talking the mic is hearing both of you. Anything that
+         looks like her own sentence coming back is discarded; anything that
+         does not is the caller cutting in, so she stops mid-word. */
+      if (speakingRef.current) {
+        const heard = (final || interim).trim();
+        if (!heard || isEcho(heard, spokenRef.current)) return;
+        // One stray word is usually a misheard fragment of her own speech.
+        if (heard.split(/\s+/).length < 2) return;
+
+        cancelSpeech();
+        speakingRef.current = false;
+        busyRef.current = false;
+        setSpeaking(false);
+      }
+
       if (interim) setDraft(interim);
       if (final.trim()) {
         setDraft("");
@@ -268,7 +300,7 @@ export default function VoiceDemo() {
       /* Android Chrome ends recognition on its own after a pause. In a real
          call that is not the end of the conversation, so pick it straight
          back up — unless she is talking, or the caller switched it off. */
-      if (handsFreeRef.current && callLiveRef.current && !busyRef.current) {
+      if (handsFreeRef.current && callLiveRef.current) {
         window.setTimeout(() => beginListeningRef.current(), 250);
       }
     };
@@ -614,6 +646,33 @@ export default function VoiceDemo() {
       </div>
     </section>
   );
+}
+
+/**
+ * Is this the receptionist's own voice coming back through the microphone?
+ *
+ * With the mic open during playback it hears both people. Comparing what was
+ * heard against what she is currently saying separates the two: mostly her
+ * words means echo, anything else means the caller is talking over her.
+ *
+ * Word overlap rather than exact matching, because recognition mangles the
+ * tail of a sentence and rarely returns it verbatim.
+ */
+function isEcho(heard: string, spoken: string): boolean {
+  if (!spoken) return false;
+  const words = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, "")
+      .split(/\s+/)
+      .filter(Boolean);
+
+  const h = words(heard);
+  if (!h.length) return true;
+
+  const hers = new Set(words(spoken));
+  const shared = h.filter((w) => hers.has(w)).length;
+  return shared / h.length > 0.5;
 }
 
 /* ------------------------------------------------------------------ bits */
