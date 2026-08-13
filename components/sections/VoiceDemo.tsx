@@ -210,14 +210,27 @@ export default function VoiceDemo() {
     const rec = new Ctor();
     rec.lang = getLanguage(language).locale;
     rec.interimResults = true;
-    rec.continuous = false;
+    /* Stay open across pauses. With this false, recognition stopped after
+       every utterance and had to be restarted, which Chrome throttles and
+       which makes the mic indicator flicker on and off mid-conversation. */
+    rec.continuous = true;
 
     rec.onresult = (e: SpeechRecognitionEvent) => {
-      const said = Array.from(e.results)
-        .map((r) => r[0].transcript)
-        .join("");
-      setDraft(said);
-      if (e.results[e.results.length - 1].isFinal) send(said);
+      /* In continuous mode `results` keeps every utterance of the session, so
+         read only from resultIndex — otherwise each new sentence would be
+         sent with all the previous ones glued to the front of it. */
+      let interim = "";
+      let final = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const text = e.results[i][0].transcript;
+        if (e.results[i].isFinal) final += text;
+        else interim += text;
+      }
+      if (interim) setDraft(interim);
+      if (final.trim()) {
+        setDraft("");
+        send(final.trim());
+      }
     };
     rec.onend = () => {
       setListening(false);
