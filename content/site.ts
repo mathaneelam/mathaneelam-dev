@@ -91,9 +91,9 @@ export const site = {
     eyebrow: "Try it yourself",
     heading: "Pick a language. Pick a business. Press call.",
     body: "This is not a video. You are talking to the same kind of AI receptionist I would build for you. Speak to it, or type — whichever you prefer.",
-    micHint: "Tap the mic to speak, or type here",
+    micHint: "Just talk — or type here instead",
     typeHint: "Type your reply",
-    listeningLabel: "Listening… tap to stop",
+    listeningLabel: "Listening… just talk",
     // Shown when the browser refuses microphone access.
     micBlocked:
       "Your browser is blocking the microphone. Tap the padlock in the address bar and allow it — or just type below, which works the same.",

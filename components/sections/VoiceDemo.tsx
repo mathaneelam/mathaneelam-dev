@@ -57,6 +57,17 @@ export default function VoiceDemo() {
   const turnsRef = useRef<Turn[]>([]);
   turnsRef.current = turns;
 
+  /* Hands-free is what makes this feel like a call rather than dictation.
+   * Once connected, the receptionist listens on her own after every reply —
+   * the caller never taps anything between turns.
+   *
+   * These are refs, not state, because the speech callbacks are created once
+   * and would otherwise close over stale values. */
+  const handsFreeRef = useRef(true);
+  const callLiveRef = useRef(false);
+  const busyRef = useRef(false);
+  const beginListeningRef = useRef<() => void>(() => {});
+
   /* Capability detection runs in the browser only, after mount, so the
      server-rendered HTML is identical for everyone. */
   useEffect(() => {
@@ -76,7 +87,11 @@ export default function VoiceDemo() {
      different person now. */
   const reset = useCallback(() => {
     cancelSpeech();
+    callLiveRef.current = false; // stops the hands-free loop restarting
+    handsFreeRef.current = true;
+    busyRef.current = false;
     recognitionRef.current?.abort();
+    setMicError(null);
     setState("idle");
     setTurns([]);
     setDraft("");
@@ -116,6 +131,10 @@ export default function VoiceDemo() {
 
       setTurns((t) => [...t, { role: "agent", text: reply.text }]);
 
+      // Stop listening while she talks, so the mic does not hear her.
+      busyRef.current = true;
+      recognitionRef.current?.abort();
+
       await speak(reply.text, {
         clip: reply.clip,
         industry,
@@ -124,7 +143,19 @@ export default function VoiceDemo() {
         onEnd: () => setSpeaking(false),
       });
 
-      if (reply.ended) setState("ended");
+      busyRef.current = false;
+
+      if (reply.ended) {
+        callLiveRef.current = false;
+        setState("ended");
+        return;
+      }
+
+      // She has finished her sentence, so she listens again — this is what
+      // turns the demo from dictation into a conversation.
+      if (handsFreeRef.current) {
+        window.setTimeout(() => beginListeningRef.current(), 350);
+      }
     },
     [industry, language, persona, scriptedLocale],
   );
@@ -132,12 +163,16 @@ export default function VoiceDemo() {
   const startCall = useCallback(() => {
     unlock(); // must happen inside the tap, or mobile blocks all audio
     setTurns([]);
+    setMicError(null);
+    handsFreeRef.current = micAvailable;
+    busyRef.current = false;
     setState("connecting");
     window.setTimeout(() => {
+      callLiveRef.current = true;
       setState("live");
       void ask([]);
     }, 900); // a beat of ringing, so it feels like a call
-  }, [ask]);
+  }, [ask, micAvailable]);
 
   const send = useCallback(
     (text: string) => {
@@ -158,14 +193,9 @@ export default function VoiceDemo() {
    *
    * Every failure path says something. A microphone button that silently does
    * nothing when permission is blocked is worse than no button at all. */
-  const toggleListening = useCallback(() => {
-    if (thinking || speaking) return;
-
-    if (listening) {
-      recognitionRef.current?.stop();
-      setListening(false);
-      return;
-    }
+  const beginListening = useCallback(() => {
+    // Never listen while she is talking, or it hears itself.
+    if (busyRef.current || !callLiveRef.current) return;
 
     const Ctor =
       (window as unknown as { SpeechRecognition?: typeof SpeechRecognition })
@@ -189,11 +219,20 @@ export default function VoiceDemo() {
       setDraft(said);
       if (e.results[e.results.length - 1].isFinal) send(said);
     };
-    rec.onend = () => setListening(false);
+    rec.onend = () => {
+      setListening(false);
+      /* Android Chrome ends recognition on its own after a pause. In a real
+         call that is not the end of the conversation, so pick it straight
+         back up — unless she is talking, or the caller switched it off. */
+      if (handsFreeRef.current && callLiveRef.current && !busyRef.current) {
+        window.setTimeout(() => beginListeningRef.current(), 250);
+      }
+    };
     rec.onerror = (e: SpeechRecognitionErrorEvent) => {
       setListening(false);
       // "no-speech" just means they said nothing — not worth a message.
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        handsFreeRef.current = false; // stop retrying against a wall
         setMicError(site.demo.micBlocked);
       } else if (e.error !== "no-speech" && e.error !== "aborted") {
         setMicError(site.demo.micFailed);
@@ -206,10 +245,26 @@ export default function VoiceDemo() {
     try {
       rec.start();
     } catch {
+      // Already running — harmless, and not worth telling the caller about.
       setListening(false);
-      setMicError(site.demo.micFailed);
     }
-  }, [listening, language, send, thinking, speaking]);
+  }, [language, send]);
+
+  // Kept in a ref so the speech callbacks above can call the latest version.
+  beginListeningRef.current = beginListening;
+
+  /* The mic button is now only a manual override: tap to interrupt her, or to
+     switch hands-free back on if you turned it off. */
+  const toggleListening = useCallback(() => {
+    if (listening) {
+      handsFreeRef.current = false;
+      recognitionRef.current?.stop();
+      setListening(false);
+      return;
+    }
+    handsFreeRef.current = true;
+    beginListening();
+  }, [listening, beginListening]);
 
   const busy = thinking || speaking;
 
@@ -281,7 +336,9 @@ export default function VoiceDemo() {
                       ? `${persona.agentName} is speaking`
                       : thinking
                         ? "…"
-                        : "Connected"
+                        : listening
+                          ? "Listening — just talk"
+                          : "Connected"
                     : state === "connecting"
                       ? "Ringing…"
                       : state === "ended"
