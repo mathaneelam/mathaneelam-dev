@@ -147,7 +147,12 @@ export function scriptedReply(
  *     thinking and the caller receives a half-finished sentence. A
  *     receptionist does not need to deliberate, so it is switched off below —
  *     which also takes the reply from ~23s down to ~1.2s. */
-const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.5-flash";
+/* `||` and .trim(), deliberately, NOT `??`. An env var that exists but is
+ * blank — which is what you get from creating the variable in a dashboard and
+ * leaving the value empty — is `""`, and `??` would happily accept it. That
+ * produced a request to `models/:generateContent`, a 404, and a silent
+ * fallback to the script with no visible symptom. */
+const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash";
 
 async function geminiReply(
   industry: IndustryId,

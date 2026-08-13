@@ -48,7 +48,8 @@ async function checkGemini() {
     return;
   }
 
-  const model = process.env.GEMINI_MODEL ?? "gemini-3.5-flash";
+  // `||` not `??` — a blank env var is "" and must fall back. See lib/brain.ts.
+  const model = process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash";
   try {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,

@@ -83,7 +83,7 @@ export async function POST(req: Request) {
       ...(debug && {
         debug: {
           geminiKeyPresent: Boolean(process.env.GEMINI_API_KEY),
-          model: process.env.GEMINI_MODEL ?? "gemini-3.5-flash (default)",
+          model: process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash (default)",
           whyNotLive: diagnostics.lastReason,
         },
       }),
