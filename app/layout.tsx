@@ -13,8 +13,16 @@ const dmSerif = DM_Serif_Display({
   preload: true,
 });
 
+/* Social-card and canonical URLs must be absolute, and they must point at the
+ * address the site is actually served from — otherwise WhatsApp fetches a
+ * preview image that does not exist. Vercel tells us the real production
+ * domain, so prefer that over the hardcoded fallback and it can never drift. */
+const siteUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
+  ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+  : site.url;
+
 export const metadata: Metadata = {
-  metadataBase: new URL(site.url),
+  metadataBase: new URL(siteUrl),
   title: {
     default: `${site.name} — ${site.role}`,
     template: `%s — ${site.name}`,
@@ -33,7 +41,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "en_IN",
-    url: site.url,
+    url: siteUrl,
     siteName: site.name,
     title: `${site.name} — ${site.role}`,
     description: site.description,

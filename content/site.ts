@@ -26,8 +26,9 @@ export const site = {
   description:
     "I build AI receptionists that answer your business phone in Tamil, Hindi or English — day, night and Sunday. You keep your existing number.",
 
-  // Your website address. Change this after you connect a real domain.
-  url: "https://mathaneelam-dev.vercel.app",
+  // Your website address. Only used as a fallback — on Vercel the real
+  // address is detected automatically. Change it when you buy a domain.
+  url: "https://mathaneelam.vercel.app",
 
   // Where you are based. This appears in the About section.
   city: "Tiruppur",
