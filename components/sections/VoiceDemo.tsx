@@ -42,6 +42,11 @@ export default function VoiceDemo() {
   const [thinking, setThinking] = useState(false);
   const [listening, setListening] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
+  /* Voice is the product; typing is the fallback for iPhones and for anyone
+     who would rather not talk. The call screen shows one or the other, never
+     both — a text box sitting under a live call makes it feel like a chat
+     window rather than a phone call. */
+  const [mode, setMode] = useState<"voice" | "text">("voice");
   const [draft, setDraft] = useState("");
   const [micAvailable, setMicAvailable] = useState(false);
   const [onIOS, setOnIOS] = useState(false);
@@ -189,6 +194,9 @@ export default function VoiceDemo() {
     setMicError(null);
     handsFreeRef.current = micAvailable;
     busyRef.current = false;
+    // No mic on this device (iPhone) — go straight to typing rather than
+    // showing a call screen that can never hear anything.
+    setMode(micAvailable ? "voice" : "text");
     setState("connecting");
     window.setTimeout(() => {
       callLiveRef.current = true;
@@ -410,11 +418,49 @@ export default function VoiceDemo() {
                   </div>
                 )}
 
-                {turns.map((t, i) => (
-                  <Bubble key={i} role={t.role} text={t.text} />
-                ))}
+                {/* VOICE MODE — a call screen, not a chat log. */}
+                {state !== "idle" && mode === "voice" && (
+                  <div className="flex h-full flex-col items-center justify-center text-center">
+                    <div
+                      className={`flex h-24 w-24 items-center justify-center rounded-full border-[0.8px] transition-colors ${
+                        speaking
+                          ? "border-[color:var(--color-accent-line)] bg-[color:var(--color-accent-soft)]"
+                          : listening
+                            ? "animate-pulse-ring border-transparent bg-[color:var(--color-whatsapp)]/15"
+                            : "border-[color:var(--color-line-strong)]"
+                      }`}
+                    >
+                      <span className="text-[2.6rem]" aria-hidden="true">
+                        {persona.emoji}
+                      </span>
+                    </div>
 
-                {thinking && (
+                    <p className="mt-6 font-[family-name:var(--font-display)] text-[1.3rem] text-[color:var(--color-text)]">
+                      {persona.agentName}
+                    </p>
+                    <p className="mt-1.5 text-[0.85rem] text-[color:var(--color-muted)]">
+                      {speaking
+                        ? "Speaking…"
+                        : thinking
+                          ? "…"
+                          : listening
+                            ? "Listening — just talk"
+                            : "Connected"}
+                    </p>
+
+                    {speaking && (
+                      <div className="mt-5">
+                        <Waveform />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* TEXT MODE — the full transcript. */}
+                {mode === "text" &&
+                  turns.map((t, i) => <Bubble key={i} role={t.role} text={t.text} />)}
+
+                {mode === "text" && thinking && (
                   <div className="flex justify-start">
                     <span className="rounded-2xl rounded-bl-sm bg-[color:var(--color-raised)] px-4 py-2.5 text-[0.9rem] text-[color:var(--color-muted)]">
                       <span className="animate-caret">▊</span>
@@ -422,9 +468,6 @@ export default function VoiceDemo() {
                   </div>
                 )}
               </div>
-
-              {/* Waveform — shows while the receptionist is talking */}
-              {speaking && <Waveform />}
 
               {/* Controls */}
               <div className="shrink-0 pt-3">
@@ -444,7 +487,42 @@ export default function VoiceDemo() {
                   </p>
                 )}
 
-                {state === "live" && (
+                {/* VOICE MODE controls — hang up, and a quiet way out to
+                    typing. Nothing else on screen during a call. */}
+                {state === "live" && mode === "voice" && (
+                  <div className="space-y-3">
+                    {micError && (
+                      <p className="rounded-lg bg-[color:var(--color-accent-soft)] px-3 py-2 text-[0.7rem] leading-snug text-[color:var(--color-text)]">
+                        {micError}
+                      </p>
+                    )}
+
+                    <button
+                      onClick={reset}
+                      aria-label="End the call"
+                      className="mx-auto flex h-[52px] w-[52px] items-center justify-center rounded-full bg-[#3a1f1a] text-[#e06a5c]"
+                    >
+                      <span className="rotate-[135deg]">
+                        <PhoneIcon />
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        handsFreeRef.current = false;
+                        recognitionRef.current?.abort();
+                        setListening(false);
+                        setMode("text");
+                      }}
+                      className="mx-auto block text-[0.72rem] text-[color:var(--color-muted)] underline underline-offset-4"
+                      style={{ minHeight: 0 }}
+                    >
+                      Type instead
+                    </button>
+                  </div>
+                )}
+
+                {state === "live" && mode === "text" && (
                   <div className="space-y-2.5">
                     {turns.length <= 1 && !busy && (
                       <div className="flex flex-wrap gap-1.5">
