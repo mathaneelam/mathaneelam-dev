@@ -84,7 +84,17 @@ export async function speak(
     // No clip on disk yet - fall through to the phone's own voice.
   }
 
-  // ------------------------------------------------- 2. the phone's voice
+  // ------------------------------------------------- 2. server-generated
+  // The important level. The browser can only use voices installed in the
+  // operating system, and Windows has none for Tamil — so on a PC this is the
+  // only thing that can actually say it.
+  const server = await speakFromServer(text, opts.language, opts.onStart);
+  if (server) {
+    finish();
+    return;
+  }
+
+  // ------------------------------------------------- 3. the phone's voice
   const spoke = await speakWithBrowser(text, opts.language, opts.onStart);
   if (spoke) {
     finish();
@@ -97,6 +107,39 @@ export async function speak(
   opts.onStart?.();
   await new Promise((r) => setTimeout(r, Math.min(2600, text.length * 45)));
   finish();
+}
+
+/**
+ * Asks the server to synthesise the line, then plays it.
+ *
+ * Returns false on anything unexpected — a missing key, a slow upstream, an
+ * unplayable response — so the caller drops to the device's own voice and the
+ * conversation carries on rather than stopping dead.
+ */
+async function speakFromServer(
+  text: string,
+  language: LanguageCode,
+  onStart?: () => void,
+): Promise<boolean> {
+  try {
+    const res = await fetch("/api/speak", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text, language }),
+    });
+    // 204 means "no voice available" — expected, not an error.
+    if (!res.ok || res.status === 204) return false;
+
+    const blob = await res.blob();
+    if (!blob.size) return false;
+
+    const url = URL.createObjectURL(blob);
+    const played = await playClip(url, onStart);
+    URL.revokeObjectURL(url);
+    return played;
+  } catch {
+    return false;
+  }
 }
 
 function playClip(src: string, onStart?: () => void): Promise<boolean> {
@@ -112,19 +155,24 @@ function playClip(src: string, onStart?: () => void): Promise<boolean> {
       resolve(ok);
     };
 
-    audio.addEventListener("playing", () => onStart?.(), { once: true });
+    /* The timeout below guards STARTING, not playing. Once the audio is
+       actually running it is cleared, otherwise a line longer than the
+       timeout would be cut off and then spoken again by the fallback. */
+    const startGuard = setTimeout(() => done(false), 2500);
+
+    audio.addEventListener(
+      "playing",
+      () => {
+        clearTimeout(startGuard);
+        onStart?.();
+      },
+      { once: true },
+    );
     audio.addEventListener("ended", () => done(true), { once: true });
     audio.addEventListener("error", () => done(false), { once: true });
-
     audio.addEventListener("stalled", () => done(false), { once: true });
 
     void audio.play().catch(() => done(false));
-
-    /* Two seconds, not twelve. A missing clip usually errors immediately, but
-       when it does not, this wait is dead silence in the middle of a phone
-       call — which is far worse than falling straight through to the phone's
-       own voice. Real clips are small and local, so 2s is ample. */
-    setTimeout(() => done(false), 2000);
   });
 }
 
