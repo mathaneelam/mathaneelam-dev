@@ -39,6 +39,7 @@ export default function VoiceDemo() {
   const [speaking, setSpeaking] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [listening, setListening] = useState(false);
+  const [micError, setMicError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [micAvailable, setMicAvailable] = useState(false);
   const [onIOS, setOnIOS] = useState(false);
@@ -150,16 +151,31 @@ export default function VoiceDemo() {
     [ask, thinking, speaking],
   );
 
-  /* Press-and-hold to talk. Android Chrome only — Apple does not allow this
-     in Safari, so those visitors get the text box instead. */
-  const startListening = useCallback(() => {
-    if (!micAvailable || thinking || speaking) return;
+  /* Tap to start, tap again to stop.
+   *
+   * This was press-and-hold, which nobody discovers and which is awkward with
+   * a mouse. A toggle is obvious on a phone and on a laptop alike.
+   *
+   * Every failure path says something. A microphone button that silently does
+   * nothing when permission is blocked is worse than no button at all. */
+  const toggleListening = useCallback(() => {
+    if (thinking || speaking) return;
+
+    if (listening) {
+      recognitionRef.current?.stop();
+      setListening(false);
+      return;
+    }
+
     const Ctor =
       (window as unknown as { SpeechRecognition?: typeof SpeechRecognition })
         .SpeechRecognition ??
       (window as unknown as { webkitSpeechRecognition?: typeof SpeechRecognition })
         .webkitSpeechRecognition;
-    if (!Ctor) return;
+    if (!Ctor) {
+      setMicError(site.demo.micBlocked);
+      return;
+    }
 
     const rec = new Ctor();
     rec.lang = getLanguage(language).locale;
@@ -174,17 +190,26 @@ export default function VoiceDemo() {
       if (e.results[e.results.length - 1].isFinal) send(said);
     };
     rec.onend = () => setListening(false);
-    rec.onerror = () => setListening(false);
+    rec.onerror = (e: SpeechRecognitionErrorEvent) => {
+      setListening(false);
+      // "no-speech" just means they said nothing — not worth a message.
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        setMicError(site.demo.micBlocked);
+      } else if (e.error !== "no-speech" && e.error !== "aborted") {
+        setMicError(site.demo.micFailed);
+      }
+    };
 
     recognitionRef.current = rec;
+    setMicError(null);
     setListening(true);
-    rec.start();
-  }, [micAvailable, language, send, thinking, speaking]);
-
-  const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
-    setListening(false);
-  }, []);
+    try {
+      rec.start();
+    } catch {
+      setListening(false);
+      setMicError(site.demo.micFailed);
+    }
+  }, [listening, language, send, thinking, speaking]);
 
   const busy = thinking || speaking;
 
@@ -339,28 +364,19 @@ export default function VoiceDemo() {
                         onChange={(e) => setDraft(e.target.value)}
                         onKeyDown={(e) => e.key === "Enter" && send(draft)}
                         placeholder={
-                          micAvailable ? site.demo.micHint : site.demo.typeHint
+                          listening
+                            ? site.demo.listeningLabel
+                            : micAvailable
+                              ? site.demo.micHint
+                              : site.demo.typeHint
                         }
                         disabled={busy}
                         className="h-[44px] min-w-0 flex-1 rounded-full border-[0.8px] border-[color:var(--color-line-strong)] bg-transparent px-4 text-[0.85rem] text-[color:var(--color-text)] placeholder:text-[color:var(--color-muted)] outline-none focus:border-[color:var(--color-accent-line)]"
                       />
 
-                      {micAvailable ? (
-                        <button
-                          onPointerDown={startListening}
-                          onPointerUp={stopListening}
-                          onPointerLeave={stopListening}
-                          disabled={busy}
-                          aria-label="Hold to speak"
-                          className={`flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-full transition-colors ${
-                            listening
-                              ? "bg-[color:var(--color-accent)] text-[color:var(--color-cream)]"
-                              : "border-[0.8px] border-[color:var(--color-line-strong)] text-[color:var(--color-muted)]"
-                          }`}
-                        >
-                          <MicIcon />
-                        </button>
-                      ) : (
+                      {/* Send appears as soon as there is something to send.
+                          Otherwise the mic, where the browser allows it. */}
+                      {draft.trim() || !micAvailable ? (
                         <button
                           onClick={() => send(draft)}
                           disabled={busy || !draft.trim()}
@@ -369,10 +385,31 @@ export default function VoiceDemo() {
                         >
                           <SendIcon />
                         </button>
+                      ) : (
+                        <button
+                          onClick={toggleListening}
+                          disabled={busy}
+                          aria-label={listening ? "Stop listening" : "Tap to speak"}
+                          className={`flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-full transition-colors ${
+                            listening
+                              ? "animate-pulse-ring bg-[color:var(--color-accent)] text-[color:var(--color-cream)]"
+                              : "border-[0.8px] border-[color:var(--color-line-strong)] text-[color:var(--color-muted)]"
+                          }`}
+                        >
+                          <MicIcon />
+                        </button>
                       )}
                     </div>
 
-                    {onIOS && (
+                    {/* A mic button that silently does nothing is worse than
+                        no mic button. Always say what happened. */}
+                    {micError && (
+                      <p className="rounded-lg bg-[color:var(--color-accent-soft)] px-3 py-2 text-[0.7rem] leading-snug text-[color:var(--color-text)]">
+                        {micError}
+                      </p>
+                    )}
+
+                    {onIOS && !micError && (
                       <p className="text-center text-[0.68rem] text-[color:var(--color-muted)]/80">
                         {site.demo.iosNotice}
                       </p>
