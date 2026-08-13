@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { generateReply, type Turn } from "@/lib/brain";
+import { diagnostics, generateReply, type Turn } from "@/lib/brain";
 import { LIMITS, callerKey, claimLiveReply, mayStartCall } from "@/lib/limits";
 import { LANGUAGES, type LanguageCode } from "@/lib/languages";
 import { PERSONAS, type IndustryId } from "@/lib/personas";
@@ -71,11 +71,22 @@ export async function POST(req: Request) {
 
   const reply = await generateReply(industry, language, history, { allowLive });
 
+  // ?debug=1 explains why a reply came from the script instead of live AI.
+  // Categories only — never the key, never anything the visitor typed.
+  const debug = new URL(req.url).searchParams.get("debug") === "1";
+
   return NextResponse.json(
     {
       ...reply,
       // Tell the client to wind the call up once the turn budget is spent.
       ended: reply.ended || callerTurns >= LIMITS.maxTurnsPerCall,
+      ...(debug && {
+        debug: {
+          geminiKeyPresent: Boolean(process.env.GEMINI_API_KEY),
+          model: process.env.GEMINI_MODEL ?? "gemini-3.5-flash (default)",
+          whyNotLive: diagnostics.lastReason,
+        },
+      }),
     },
     { headers: { "cache-control": "no-store" } },
   );

@@ -203,6 +203,12 @@ async function geminiReply(
  * THE ONE ENTRY POINT
  * ------------------------------------------------------------------------ */
 
+/* Why the last request did NOT use live AI. Surfaced only via ?debug=1 on the
+ * API route, and only ever as a category — never the key or any user text.
+ * Exists because the fallback is deliberately silent, which makes a
+ * misconfigured deployment impossible to tell apart from a working one. */
+export const diagnostics: { lastReason: string | null } = { lastReason: null };
+
 const SCRIPTED_LANGUAGES: ScriptedLanguage[] = ["ta", "hi", "en"];
 
 export function isScriptedLanguage(code: LanguageCode): code is ScriptedLanguage {
@@ -217,9 +223,13 @@ export async function generateReply(
 ): Promise<ReplyResult> {
   const key = process.env.GEMINI_API_KEY;
 
+  if (!key) diagnostics.lastReason = "no GEMINI_API_KEY in this build";
+  else if (!opts.allowLive) diagnostics.lastReason = "live disabled (turn or daily cap reached)";
+
   if (opts.allowLive && key) {
     try {
       const live = await geminiReply(industry, language, history, key);
+      diagnostics.lastReason = null;
       // If the live reply happens to match a recorded line, play the recording.
       const persona = getPersona(industry);
       if (isScriptedLanguage(language)) {
@@ -228,9 +238,11 @@ export async function generateReply(
         if (match) live.clip = match[0];
       }
       return live;
-    } catch {
+    } catch (err) {
       // Fall through. A visitor should never see an error where a
-      // receptionist should be.
+      // receptionist should be — but record why, so `?debug=1` can say.
+      diagnostics.lastReason =
+        err instanceof Error ? `gemini call failed: ${err.message}` : "gemini call failed";
     }
   }
 
