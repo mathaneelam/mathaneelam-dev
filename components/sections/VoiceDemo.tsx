@@ -80,6 +80,7 @@ export default function VoiceDemo() {
    * saying so her own words can be recognised and ignored. */
   const spokenRef = useRef("");
   const speakingRef = useRef(false);
+  const speakStartedRef = useRef(0);
 
   /* Capability detection runs in the browser only, after mount, so the
      server-rendered HTML is identical for everyone. */
@@ -178,8 +179,9 @@ export default function VoiceDemo() {
         language,
         onStart: () => {
           setSpeaking(true);
-          // Open the mic as she starts, so she can be cut off from the very
-          // first word rather than only once she has finished.
+          speakStartedRef.current = Date.now();
+          // Open the mic as she starts, so she can be cut off part-way
+          // through rather than only once she has finished.
           if (handsFreeRef.current) beginListeningRef.current();
         },
         onEnd: () => setSpeaking(false),
@@ -278,10 +280,15 @@ export default function VoiceDemo() {
          looks like her own sentence coming back is discarded; anything that
          does not is the caller cutting in, so she stops mid-word. */
       if (speakingRef.current) {
-        const heard = (final || interim).trim();
-        if (!heard || isEcho(heard, spokenRef.current)) return;
-        // One stray word is usually a misheard fragment of her own speech.
-        if (heard.split(/\s+/).length < 2) return;
+        // Interim results are mostly noise and half-heard fragments of her
+        // own voice. Only a settled, finished phrase counts as interrupting.
+        if (!final.trim()) return;
+        const heard = final.trim();
+        if (isEcho(heard, spokenRef.current)) return;
+        // Short bursts are nearly always the room, not a question.
+        if (heard.split(/\s+/).length < 3) return;
+        // A grace period, or she cancels herself on her own first syllable.
+        if (Date.now() - speakStartedRef.current < 1200) return;
 
         cancelSpeech();
         speakingRef.current = false;
@@ -314,6 +321,21 @@ export default function VoiceDemo() {
         setMicError(site.demo.micFailed);
       }
     };
+
+    /* Chrome permits one recognition session at a time. Without dropping the
+       previous instance these pile up and every later start() throws, which
+       silently ends up with nothing listening at all. */
+    const previous = recognitionRef.current;
+    if (previous) {
+      previous.onresult = null;
+      previous.onend = null;
+      previous.onerror = null;
+      try {
+        previous.abort();
+      } catch {
+        /* already finished */
+      }
+    }
 
     recognitionRef.current = rec;
     setMicError(null);
