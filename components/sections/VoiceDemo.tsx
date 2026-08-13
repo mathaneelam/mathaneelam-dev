@@ -6,8 +6,10 @@ import { site } from "@/content/site";
 import {
   DEFAULT_LANGUAGE,
   FLAGSHIP,
+  LANGUAGES,
   OTHER_LANGUAGES,
   canListen,
+  canSpeak,
   getLanguage,
   isIOS,
   whenVoicesReady,
@@ -70,10 +72,31 @@ export default function VoiceDemo() {
 
   /* Capability detection runs in the browser only, after mount, so the
      server-rendered HTML is identical for everyone. */
+  /* Which languages this particular device can actually SAY.
+   *
+   * Windows ships a Hindi voice but no Tamil one; many Android phones have
+   * Tamil but not Gujarati. A language with no installed voice leaves the
+   * receptionist completely silent, which reads as a broken demo rather than
+   * a missing voice pack — so we check first and never default to one the
+   * device cannot speak. */
+  const [speakable, setSpeakable] = useState<Record<string, boolean> | null>(null);
+
   useEffect(() => {
     setMicAvailable(canListen());
     setOnIOS(isIOS());
-    void whenVoicesReady();
+
+    void whenVoicesReady().then(() => {
+      const map: Record<string, boolean> = {};
+      for (const l of LANGUAGES) map[l.code] = canSpeak(l.locale);
+      setSpeakable(map);
+
+      // Keep Mathan's priority order, but land on one that can be heard.
+      setLanguage((current) => {
+        if (map[current]) return current;
+        const fallback = FLAGSHIP.find((l) => map[l.code]);
+        return fallback ? fallback.code : current;
+      });
+    });
   }, []);
 
   useEffect(() => {
@@ -321,6 +344,16 @@ export default function VoiceDemo() {
               </select>
             }
           />
+
+          {/* Said plainly, because a silent receptionist otherwise looks like
+              a broken website rather than a missing voice pack. */}
+          {speakable && speakable[language] === false && (
+            <p className="max-w-[46ch] text-center text-[0.75rem] leading-snug text-[color:var(--color-muted)]">
+              Your device has no {getLanguage(language).english} voice installed, so
+              she will reply in writing rather than out loud. Pick another language
+              above to hear her speak.
+            </p>
+          )}
 
           <Tabs
             label="Business"
