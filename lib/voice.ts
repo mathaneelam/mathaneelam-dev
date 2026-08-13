@@ -19,6 +19,11 @@ import type { IndustryId } from "./personas";
 let unlocked = false;
 let current: HTMLAudioElement | null = null;
 
+/* Clips that are not on the server. Until `npm run voice` has been run,
+ * public/voice is empty and EVERY line misses — so without remembering the
+ * misses, each reply pays the lookup wait again before she says anything. */
+const missingClips = new Set<string>();
+
 /** Call this synchronously inside a click/tap handler, once per session. */
 export function unlock(): void {
   if (unlocked || typeof window === "undefined") return;
@@ -68,10 +73,13 @@ export async function speak(
   // -------------------------------------------------- 1. recorded clip
   if (opts.clip) {
     const src = `/voice/${opts.language}/${opts.industry}/${opts.clip}.mp3`;
-    const played = await playClip(src, opts.onStart);
-    if (played) {
-      finish();
-      return;
+    if (!missingClips.has(src)) {
+      const played = await playClip(src, opts.onStart);
+      if (played) {
+        finish();
+        return;
+      }
+      missingClips.add(src);
     }
     // No clip on disk yet - fall through to the phone's own voice.
   }
@@ -108,11 +116,15 @@ function playClip(src: string, onStart?: () => void): Promise<boolean> {
     audio.addEventListener("ended", () => done(true), { once: true });
     audio.addEventListener("error", () => done(false), { once: true });
 
+    audio.addEventListener("stalled", () => done(false), { once: true });
+
     void audio.play().catch(() => done(false));
 
-    // If the file is missing the error event fires, but guard anyway so a
-    // stalled network can never hang the conversation.
-    setTimeout(() => done(false), 12_000);
+    /* Two seconds, not twelve. A missing clip usually errors immediately, but
+       when it does not, this wait is dead silence in the middle of a phone
+       call — which is far worse than falling straight through to the phone's
+       own voice. Real clips are small and local, so 2s is ample. */
+    setTimeout(() => done(false), 2000);
   });
 }
 
