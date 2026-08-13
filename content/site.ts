@@ -37,18 +37,17 @@ export const site = {
   /* -------------------------------------------------------------- CONTACT */
 
   contact: {
-    // [FILL THIS IN] Your WhatsApp number, country code first, no spaces,
-    // no plus sign. Example: an Indian number 98765 43210 becomes 919876543210
-    whatsapp: "910000000000",
+    // Your WhatsApp number: country code first, no spaces, no plus sign.
+    whatsapp: "919003388830",
 
-    // [FILL THIS IN] The same number, written how a human should read it.
-    phoneDisplay: "+91 00000 00000",
+    // The same number, written how a human should read it.
+    phoneDisplay: "+91 90033 88830",
 
-    // [FILL THIS IN] The number a phone should actually dial.
-    phoneDial: "+910000000000",
+    // The number a phone should actually dial.
+    phoneDial: "+919003388830",
 
-    // [FILL THIS IN] Your email address.
-    email: "hello@example.com",
+    // Your email address.
+    email: "mathaneelam@gmail.com",
 
     // The message that is pre-typed when someone taps your WhatsApp button.
     // Making it specific gets you far better first messages than "Hi".
