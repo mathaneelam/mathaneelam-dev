@@ -1,5 +1,5 @@
-/* ============================================================================
- *  KEY CHECKER  —  npm run check-keys
+﻿/* ============================================================================
+ *  KEY CHECKER  â€”  npm run check-keys
  *
  *  Tells you whether your Sarvam key actually works, for both the
  *  conversation and the voice, before you rely on it.
@@ -25,14 +25,14 @@ async function loadEnv() {
   }
 }
 
-const ok = (m) => console.log(`  ✓ ${m}`);
-const bad = (m) => console.log(`  ✗ ${m}`);
+const ok = (m) => console.log(`  âœ“ ${m}`);
+const bad = (m) => console.log(`  âœ— ${m}`);
 const info = (m) => console.log(`    ${m}`);
 
 await loadEnv();
 
 const key = process.env.SARVAM_API_KEY;
-// `||` not `??` — a variable created in a dashboard and left blank is "".
+// `||` not `??` â€” a variable created in a dashboard and left blank is "".
 const model = process.env.SARVAM_MODEL?.trim() || "sarvam-105b-conversations";
 
 console.log("Checking your key. Nothing here is printed to screen or saved.\n");
@@ -83,9 +83,9 @@ try {
     method: "POST",
     headers: { "api-subscription-key": key, "content-type": "application/json" },
     body: JSON.stringify({
-      text: "வணக்கம்",
+      text: "à®µà®£à®•à¯à®•à®®à¯",
       target_language_code: "ta-IN",
-      speaker: "priya",
+      speaker: process.env.SARVAM_SPEAKER?.trim() || "ritu",
       model: "bulbul:v3",
       output_audio_codec: "mp3",
     }),

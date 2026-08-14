@@ -18,9 +18,11 @@ import { LANGUAGES, type LanguageCode } from "@/lib/languages";
 
 export const dynamic = "force-dynamic";
 
-/* Sarvam speaker names, chosen to match each persona's receptionist. */
-const SPEAKER = "priya";
-const MODEL = "bulbul:v3";
+/* The Sarvam voice used for every receptionist.
+ * Override with SARVAM_SPEAKER without touching code — other options on
+ * bulbul:v3 include priya, neha, pooja, simran and aditya. */
+const SPEAKER = process.env.SARVAM_SPEAKER?.trim() || "ritu";
+const MODEL = process.env.SARVAM_TTS_MODEL?.trim() || "bulbul:v3";
 
 const VALID = new Set<string>(LANGUAGES.map((l) => l.code));
 
