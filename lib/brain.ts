@@ -183,9 +183,13 @@ async function sarvamReply(
     body: JSON.stringify({
       model: SARVAM_MODEL,
       messages,
-      // A receptionist is brief. This is also the main cost control.
-      max_tokens: 200,
-      temperature: 0.7,
+      /* Short replies are the single biggest speed lever, because length
+         costs twice: once to generate, then again to speak. A 288-character
+         answer measured 3.8s from the model before a word of audio existed.
+         Roughly 90 tokens is one or two spoken sentences, which is all a
+         receptionist should say in one turn anyway. */
+      max_tokens: 90,
+      temperature: 0.6,
     }),
     // Never let a slow upstream hold the caller waiting in silence.
     signal: AbortSignal.timeout(9000),

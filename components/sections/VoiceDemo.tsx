@@ -80,6 +80,12 @@ export default function VoiceDemo() {
   const speakingRef = useRef(false);
   const speakStartedRef = useRef(0);
 
+  /* Chrome decides you have finished talking on its own schedule, and takes
+     one to two seconds about it. That is dead air in a phone call, so we
+     watch for the words to stop changing and send it ourselves instead. */
+  const silenceTimer = useRef<number | null>(null);
+  const pendingRef = useRef("");
+
   /* Capability detection runs in the browser only, after mount, so the
      server-rendered HTML is identical for everyone. */
   /* No device-voice detection any more. Audio is generated server-side by
@@ -106,6 +112,9 @@ export default function VoiceDemo() {
     callLiveRef.current = false; // stops the hands-free loop restarting
     handsFreeRef.current = true;
     busyRef.current = false;
+    if (silenceTimer.current) window.clearTimeout(silenceTimer.current);
+    silenceTimer.current = null;
+    pendingRef.current = "";
     recognitionRef.current?.abort();
     setMicError(null);
     setState("idle");
@@ -277,10 +286,39 @@ export default function VoiceDemo() {
         setSpeaking(false);
       }
 
-      if (interim) setDraft(interim);
+      /* Chrome only emits a final result after a long pause of its own
+         choosing. Rather than wait through it, treat the words going quiet
+         for 700ms as the caller having finished, and send what we have. */
+      const clearSilence = () => {
+        if (silenceTimer.current) {
+          window.clearTimeout(silenceTimer.current);
+          silenceTimer.current = null;
+        }
+      };
+
       if (final.trim()) {
+        clearSilence();
+        pendingRef.current = "";
         setDraft("");
         send(final.trim());
+        return;
+      }
+
+      if (interim.trim()) {
+        setDraft(interim);
+        pendingRef.current = interim.trim();
+        clearSilence();
+        silenceTimer.current = window.setTimeout(() => {
+          const said = pendingRef.current.trim();
+          pendingRef.current = "";
+          silenceTimer.current = null;
+          if (!said) return;
+          setDraft("");
+          // Stop the mic so it does not also deliver its own final result
+          // a moment later and send the same sentence twice.
+          recognitionRef.current?.abort();
+          send(said);
+        }, 700);
       }
     };
     rec.onend = () => {
