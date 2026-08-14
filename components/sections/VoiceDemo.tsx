@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import SectionHead from "@/components/SectionHead";
@@ -43,7 +43,7 @@ export default function VoiceDemo() {
   const [micError, setMicError] = useState<string | null>(null);
   /* Voice is the product; typing is the fallback for iPhones and for anyone
      who would rather not talk. The call screen shows one or the other, never
-     both â€” a text box sitting under a live call makes it feel like a chat
+     both — a text box sitting under a live call makes it feel like a chat
      window rather than a phone call. */
   const [mode, setMode] = useState<"voice" | "text">("voice");
   const [draft, setDraft] = useState("");
@@ -61,14 +61,14 @@ export default function VoiceDemo() {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const turnsRef = useRef<Turn[]>([]);
-  // Assigned in an effect, not during render â€” React forbids touching refs
+  // Assigned in an effect, not during render — React forbids touching refs
   // while rendering, and lint rightly flags it.
   useEffect(() => {
     turnsRef.current = turns;
   }, [turns]);
 
   /* Hands-free is what makes this feel like a call rather than dictation.
-   * Once connected, the receptionist listens on her own after every reply â€”
+   * Once connected, the receptionist listens on her own after every reply —
    * the caller never taps anything between turns.
    *
    * These are refs, not state, because the speech callbacks are created once
@@ -108,7 +108,7 @@ export default function VoiceDemo() {
   /* Capability detection runs in the browser only, after mount, so the
      server-rendered HTML is identical for everyone. */
   /* No device-voice detection any more. Audio is generated server-side by
-     Sarvam, so every language in the picker works on every device â€” including
+     Sarvam, so every language in the picker works on every device — including
      a Windows PC or an iPhone, neither of which can install a Tamil voice.
      Tamil stays the default, always. */
   useEffect(() => {
@@ -128,7 +128,7 @@ export default function VoiceDemo() {
     });
   }, [turns, thinking]);
 
-  /* Changing language or business mid-call ends it â€” the receptionist is a
+  /* Changing language or business mid-call ends it — the receptionist is a
      different person now. */
   const reset = useCallback(() => {
     cancelSpeech();
@@ -218,7 +218,7 @@ export default function VoiceDemo() {
         return;
       }
 
-      // She has finished her sentence, so she listens again â€” this is what
+      // She has finished her sentence, so she listens again — this is what
       // turns the demo from dictation into a conversation.
       if (handsFreeRef.current) {
         window.setTimeout(() => beginListeningRef.current(), 350);
@@ -233,7 +233,7 @@ export default function VoiceDemo() {
     setMicError(null);
     handsFreeRef.current = micAvailable;
     busyRef.current = false;
-    // No mic on this device (iPhone) â€” go straight to typing rather than
+    // No mic on this device (iPhone) — go straight to typing rather than
     // showing a call screen that can never hear anything.
     setMode(micAvailable ? "voice" : "text");
     // Opens an echo-cancelled mic stream for interrupt detection. Must start
@@ -267,7 +267,7 @@ export default function VoiceDemo() {
    * Every failure path says something. A microphone button that silently does
    * nothing when permission is blocked is worse than no button at all. */
   const beginListening = useCallback(() => {
-    // Listening continues while she talks â€” that is what allows barge-in.
+    // Listening continues while she talks — that is what allows barge-in.
     if (!callLiveRef.current) return;
 
     const Ctor =
@@ -290,7 +290,7 @@ export default function VoiceDemo() {
 
     rec.onresult = (e: SpeechRecognitionEvent) => {
       /* In continuous mode `results` keeps every utterance of the session, so
-         read only from resultIndex â€” otherwise each new sentence would be
+         read only from resultIndex — otherwise each new sentence would be
          sent with all the previous ones glued to the front of it. */
       let interim = "";
       let final = "";
@@ -346,14 +346,14 @@ export default function VoiceDemo() {
       setListening(false);
       /* Android Chrome ends recognition on its own after a pause. In a real
          call that is not the end of the conversation, so pick it straight
-         back up â€” unless she is talking, or the caller switched it off. */
+         back up — unless she is talking, or the caller switched it off. */
       if (handsFreeRef.current && callLiveRef.current) {
         window.setTimeout(() => beginListeningRef.current(), 250);
       }
     };
     rec.onerror = (e: SpeechRecognitionErrorEvent) => {
       setListening(false);
-      // "no-speech" just means they said nothing â€” not worth a message.
+      // "no-speech" just means they said nothing — not worth a message.
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         handsFreeRef.current = false; // stop retrying against a wall
         setMicError(site.demo.micBlocked);
@@ -383,7 +383,7 @@ export default function VoiceDemo() {
     try {
       rec.start();
     } catch {
-      // Already running â€” harmless, and not worth telling the caller about.
+      // Already running — harmless, and not worth telling the caller about.
       setListening(false);
     }
   }, [language, send]);
@@ -439,7 +439,7 @@ export default function VoiceDemo() {
                 }}
                 className="h-[38px] rounded-full border-[0.8px] border-[color:var(--color-line-strong)] bg-transparent px-4 text-[0.82rem] text-[color:var(--color-muted)] outline-none"
               >
-                <option value="">Moreâ€¦</option>
+                <option value="">More…</option>
                 {OTHER_LANGUAGES.map((l) => (
                   <option key={l.code} value={l.code} className="bg-[#222]">
                     {l.native}
@@ -475,19 +475,19 @@ export default function VoiceDemo() {
                     ? speaking
                       ? `${persona.agentName} is speaking`
                       : thinking
-                        ? "â€¦"
+                        ? "…"
                         : listening
-                          ? "Listening â€” just talk"
+                          ? "Listening — just talk"
                           : "Connected"
                     : state === "connecting"
-                      ? "Ringingâ€¦"
+                      ? "Ringing…"
                       : state === "ended"
                         ? site.demo.endedLabel
                         : getLanguage(language).native}
                 </p>
               </div>
 
-              {/* Transcript â€” inside the handset, like live captions */}
+              {/* Transcript — inside the handset, like live captions */}
               <div
                 ref={transcriptRef}
                 className="flex-1 space-y-2.5 overflow-y-auto py-4"
@@ -504,7 +504,7 @@ export default function VoiceDemo() {
                   </div>
                 )}
 
-                {/* VOICE MODE â€” a call screen, not a chat log. */}
+                {/* VOICE MODE — a call screen, not a chat log. */}
                 {state !== "idle" && mode === "voice" && (
                   <div className="flex h-full flex-col items-center justify-center text-center">
                     {/* Tapping her cuts her off. The acoustic detector should
@@ -531,11 +531,11 @@ export default function VoiceDemo() {
                     </p>
                     <p className="mt-1.5 text-[0.85rem] text-[color:var(--color-muted)]">
                       {speaking
-                        ? "Speakingâ€¦ talk over her, or tap to stop"
+                        ? "Speaking… talk over her, or tap to stop"
                         : thinking
-                          ? "â€¦"
+                          ? "…"
                           : listening
-                            ? "Listening â€” just talk"
+                            ? "Listening — just talk"
                             : "Connected"}
                     </p>
 
@@ -547,7 +547,7 @@ export default function VoiceDemo() {
                   </div>
                 )}
 
-                {/* TEXT MODE â€” the full transcript. */}
+                {/* TEXT MODE — the full transcript. */}
                 {mode === "text" &&
                   turns.map((t, i) => <Bubble key={i} role={t.role} text={t.text} />)}
 
@@ -574,11 +574,11 @@ export default function VoiceDemo() {
 
                 {state === "connecting" && (
                   <p className="py-4 text-center text-[0.85rem] text-[color:var(--color-muted)]">
-                    Ringingâ€¦
+                    Ringing…
                   </p>
                 )}
 
-                {/* VOICE MODE controls â€” hang up, and a quiet way out to
+                {/* VOICE MODE controls — hang up, and a quiet way out to
                     typing. Nothing else on screen during a call. */}
                 {state === "live" && mode === "voice" && (
                   <div className="space-y-3">

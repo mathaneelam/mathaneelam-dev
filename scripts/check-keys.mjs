@@ -1,5 +1,5 @@
-﻿/* ============================================================================
- *  KEY CHECKER  â€”  npm run check-keys
+/* ============================================================================
+ *  KEY CHECKER  —  npm run check-keys
  *
  *  Tells you whether your Sarvam key actually works, for both the
  *  conversation and the voice, before you rely on it.
@@ -25,15 +25,16 @@ async function loadEnv() {
   }
 }
 
-const ok = (m) => console.log(`  âœ“ ${m}`);
-const bad = (m) => console.log(`  âœ— ${m}`);
-const info = (m) => console.log(`    ${m}`);
+const ok = (m) => console.log(`  [ok] ${m}`);
+const bad = (m) => console.log(`  [--] ${m}`);
+const info = (m) => console.log(`       ${m}`);
 
 await loadEnv();
 
 const key = process.env.SARVAM_API_KEY;
-// `||` not `??` â€” a variable created in a dashboard and left blank is "".
+// `||` not `??` — a variable created in a dashboard and left blank is "".
 const model = process.env.SARVAM_MODEL?.trim() || "sarvam-105b-conversations";
+const speaker = process.env.SARVAM_SPEAKER?.trim() || "ritu";
 
 console.log("Checking your key. Nothing here is printed to screen or saved.\n");
 
@@ -63,9 +64,8 @@ try {
   } else if (r.status === 429) {
     ok("Key is valid, but you have hit the rate limit. Try again shortly.");
   } else if (!r.ok) {
-    const body = await r.text();
     bad(`Sarvam replied ${r.status}.`);
-    info(body.slice(0, 200).replace(/\s+/g, " "));
+    info((await r.text()).slice(0, 200).replace(/\s+/g, " "));
   } else {
     const d = await r.json();
     ok(`Working. Replied: "${d?.choices?.[0]?.message?.content?.trim() ?? "(empty)"}"`);
@@ -83,10 +83,12 @@ try {
     method: "POST",
     headers: { "api-subscription-key": key, "content-type": "application/json" },
     body: JSON.stringify({
-      text: "à®µà®£à®•à¯à®•à®®à¯",
+      // Tamil, deliberately — it is the language with no fallback voice on a
+      // Windows PC or an iPhone, so it is the one worth proving.
+      text: "வணக்கம்",
       target_language_code: "ta-IN",
-      speaker: process.env.SARVAM_SPEAKER?.trim() || "ritu",
-      model: "bulbul:v3",
+      speaker,
+      model: process.env.SARVAM_TTS_MODEL?.trim() || "bulbul:v3",
       output_audio_codec: "mp3",
     }),
     signal: AbortSignal.timeout(30000),
@@ -102,6 +104,7 @@ try {
     if (!bytes) bad("No audio came back.");
     else {
       ok(`Working. Spoke Tamil in ${ms}ms (${(bytes / 1024).toFixed(0)}KB).`);
+      info(`Voice: ${speaker}`);
       info("This is what lets Tamil play on a PC or an iPhone, neither of");
       info("which can install a Tamil voice of its own.");
     }
