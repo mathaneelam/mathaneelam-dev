@@ -92,6 +92,17 @@ export default function VoiceDemo() {
   const pendingRef = useRef("");
   const stopWatchRef = useRef<(() => void) | null>(null);
 
+  /* Exactly one utterance may be in flight at a time.
+   *
+   * Recognition gets torn down and recreated several times a turn, and each
+   * instance keeps its own live onresult handler. So the silence timer and
+   * Chrome's own final result were BOTH sending the same sentence: two brain
+   * requests, two different answers, and two audio files playing on top of
+   * each other. Guarding the timer was not enough because the duplicate came
+   * from a different recognition object. Guarding the send path is, because
+   * every route into a turn passes through here. */
+  const turnLock = useRef(false);
+
   /** Cuts her off mid-sentence and starts listening. Used both by the
    *  acoustic detector and by tapping her on screen. */
   const interrupt = useCallback(() => {
@@ -141,6 +152,7 @@ export default function VoiceDemo() {
     stopWatchRef.current?.();
     stopWatchRef.current = null;
     speakingRef.current = false;
+    turnLock.current = false; // or the next call starts already wedged
     disarmBargeIn();
     recognitionRef.current?.abort();
     setMicError(null);
@@ -177,6 +189,7 @@ export default function VoiceDemo() {
 
       setThinking(false);
       if (!reply?.text) {
+        turnLock.current = false;
         setState("ended");
         return;
       }
@@ -211,6 +224,8 @@ export default function VoiceDemo() {
       speakingRef.current = false;
       spokenRef.current = "";
       busyRef.current = false;
+      // The turn is complete; the next utterance may go through.
+      turnLock.current = false;
 
       if (reply.ended) {
         callLiveRef.current = false;
@@ -250,13 +265,28 @@ export default function VoiceDemo() {
   const send = useCallback(
     (text: string) => {
       const clean = text.trim();
-      if (!clean || thinking || speaking) return;
+      if (!clean) return;
+      // The one gate every route into a turn passes through. Without it the
+      // silence timer and Chrome's own final result both fire and she answers
+      // twice, over herself.
+      if (turnLock.current) return;
+      turnLock.current = true;
+
+      // Stop the mic immediately so no further result from any lingering
+      // recognition instance can queue behind this one.
+      recognitionRef.current?.abort();
+      if (silenceTimer.current) window.clearTimeout(silenceTimer.current);
+      silenceTimer.current = null;
+      pendingRef.current = "";
+
       setDraft("");
       const next: Turn[] = [...turnsRef.current, { role: "caller", text: clean }];
       setTurns(next);
       void ask(next);
     },
-    [ask, thinking, speaking],
+    // `thinking` and `speaking` are no longer consulted here — the turn lock
+    // above supersedes them, and it works from a ref so it cannot go stale.
+    [ask],
   );
 
   /* Tap to start, tap again to stop.
