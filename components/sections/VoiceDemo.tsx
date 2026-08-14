@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import SectionHead from "@/components/SectionHead";
@@ -20,6 +20,7 @@ import {
   type IndustryId,
 } from "@/lib/personas";
 import { cancelSpeech, speak, unlock } from "@/lib/voice";
+import { armBargeIn, disarmBargeIn, watchForSpeech } from "@/lib/bargein";
 import type { Turn } from "@/lib/brain";
 
 type CallState = "idle" | "connecting" | "live" | "ended";
@@ -42,7 +43,7 @@ export default function VoiceDemo() {
   const [micError, setMicError] = useState<string | null>(null);
   /* Voice is the product; typing is the fallback for iPhones and for anyone
      who would rather not talk. The call screen shows one or the other, never
-     both — a text box sitting under a live call makes it feel like a chat
+     both â€” a text box sitting under a live call makes it feel like a chat
      window rather than a phone call. */
   const [mode, setMode] = useState<"voice" | "text">("voice");
   const [draft, setDraft] = useState("");
@@ -60,10 +61,14 @@ export default function VoiceDemo() {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const turnsRef = useRef<Turn[]>([]);
-  turnsRef.current = turns;
+  // Assigned in an effect, not during render â€” React forbids touching refs
+  // while rendering, and lint rightly flags it.
+  useEffect(() => {
+    turnsRef.current = turns;
+  }, [turns]);
 
   /* Hands-free is what makes this feel like a call rather than dictation.
-   * Once connected, the receptionist listens on her own after every reply —
+   * Once connected, the receptionist listens on her own after every reply â€”
    * the caller never taps anything between turns.
    *
    * These are refs, not state, because the speech callbacks are created once
@@ -85,16 +90,34 @@ export default function VoiceDemo() {
      watch for the words to stop changing and send it ourselves instead. */
   const silenceTimer = useRef<number | null>(null);
   const pendingRef = useRef("");
+  const stopWatchRef = useRef<(() => void) | null>(null);
+
+  /** Cuts her off mid-sentence and starts listening. Used both by the
+   *  acoustic detector and by tapping her on screen. */
+  const interrupt = useCallback(() => {
+    if (!speakingRef.current) return;
+    cancelSpeech();
+    stopWatchRef.current?.();
+    stopWatchRef.current = null;
+    speakingRef.current = false;
+    busyRef.current = false;
+    setSpeaking(false);
+    if (handsFreeRef.current) beginListeningRef.current();
+  }, []);
 
   /* Capability detection runs in the browser only, after mount, so the
      server-rendered HTML is identical for everyone. */
   /* No device-voice detection any more. Audio is generated server-side by
-     Sarvam, so every language in the picker works on every device — including
+     Sarvam, so every language in the picker works on every device â€” including
      a Windows PC or an iPhone, neither of which can install a Tamil voice.
      Tamil stays the default, always. */
   useEffect(() => {
-    setMicAvailable(canListen());
-    setOnIOS(isIOS());
+    // Deferred rather than set synchronously, so this does not cascade a
+    // second render immediately after mount.
+    queueMicrotask(() => {
+      setMicAvailable(canListen());
+      setOnIOS(isIOS());
+    });
     void whenVoicesReady(); // still used as a last-resort fallback
   }, []);
 
@@ -105,7 +128,7 @@ export default function VoiceDemo() {
     });
   }, [turns, thinking]);
 
-  /* Changing language or business mid-call ends it — the receptionist is a
+  /* Changing language or business mid-call ends it â€” the receptionist is a
      different person now. */
   const reset = useCallback(() => {
     cancelSpeech();
@@ -115,6 +138,10 @@ export default function VoiceDemo() {
     if (silenceTimer.current) window.clearTimeout(silenceTimer.current);
     silenceTimer.current = null;
     pendingRef.current = "";
+    stopWatchRef.current?.();
+    stopWatchRef.current = null;
+    speakingRef.current = false;
+    disarmBargeIn();
     recognitionRef.current?.abort();
     setMicError(null);
     setState("idle");
@@ -156,9 +183,9 @@ export default function VoiceDemo() {
 
       setTurns((t) => [...t, { role: "agent", text: reply.text }]);
 
-      /* The mic deliberately stays open here. Muting it would make her
-         impossible to interrupt, which is the single most unnatural thing a
-         voice agent can do. Her own words are filtered out in onresult. */
+      /* Interrupting her is handled acoustically while she speaks — see the
+         watchForSpeech call below. Recognition text is ignored during
+         playback, because on speakers it is a mix of both voices. */
       busyRef.current = true;
       spokenRef.current = reply.text;
       speakingRef.current = true;
@@ -170,11 +197,15 @@ export default function VoiceDemo() {
         onStart: () => {
           setSpeaking(true);
           speakStartedRef.current = Date.now();
-          // Open the mic as she starts, so she can be cut off part-way
-          // through rather than only once she has finished.
-          if (handsFreeRef.current) beginListeningRef.current();
+          // Listen acoustically for the caller cutting in. This works on
+          // speakers, where comparing recognised words does not.
+          stopWatchRef.current = watchForSpeech(() => interrupt());
         },
-        onEnd: () => setSpeaking(false),
+        onEnd: () => {
+          setSpeaking(false);
+          stopWatchRef.current?.();
+          stopWatchRef.current = null;
+        },
       });
 
       speakingRef.current = false;
@@ -187,13 +218,13 @@ export default function VoiceDemo() {
         return;
       }
 
-      // She has finished her sentence, so she listens again — this is what
+      // She has finished her sentence, so she listens again â€” this is what
       // turns the demo from dictation into a conversation.
       if (handsFreeRef.current) {
         window.setTimeout(() => beginListeningRef.current(), 350);
       }
     },
-    [industry, language, persona, scriptedLocale],
+    [industry, language, persona, scriptedLocale, interrupt],
   );
 
   const startCall = useCallback(() => {
@@ -202,9 +233,12 @@ export default function VoiceDemo() {
     setMicError(null);
     handsFreeRef.current = micAvailable;
     busyRef.current = false;
-    // No mic on this device (iPhone) — go straight to typing rather than
+    // No mic on this device (iPhone) â€” go straight to typing rather than
     // showing a call screen that can never hear anything.
     setMode(micAvailable ? "voice" : "text");
+    // Opens an echo-cancelled mic stream for interrupt detection. Must start
+    // from this tap, like all audio permissions on mobile.
+    void armBargeIn();
     setState("connecting");
     window.setTimeout(() => {
       callLiveRef.current = true;
@@ -233,7 +267,7 @@ export default function VoiceDemo() {
    * Every failure path says something. A microphone button that silently does
    * nothing when permission is blocked is worse than no button at all. */
   const beginListening = useCallback(() => {
-    // Listening continues while she talks — that is what allows barge-in.
+    // Listening continues while she talks â€” that is what allows barge-in.
     if (!callLiveRef.current) return;
 
     const Ctor =
@@ -256,7 +290,7 @@ export default function VoiceDemo() {
 
     rec.onresult = (e: SpeechRecognitionEvent) => {
       /* In continuous mode `results` keeps every utterance of the session, so
-         read only from resultIndex — otherwise each new sentence would be
+         read only from resultIndex â€” otherwise each new sentence would be
          sent with all the previous ones glued to the front of it. */
       let interim = "";
       let final = "";
@@ -266,25 +300,12 @@ export default function VoiceDemo() {
         else interim += text;
       }
 
-      /* While she is talking the mic is hearing both of you. Anything that
-         looks like her own sentence coming back is discarded; anything that
-         does not is the caller cutting in, so she stops mid-word. */
-      if (speakingRef.current) {
-        // Interim results are mostly noise and half-heard fragments of her
-        // own voice. Only a settled, finished phrase counts as interrupting.
-        if (!final.trim()) return;
-        const heard = final.trim();
-        if (isEcho(heard, spokenRef.current)) return;
-        // Short bursts are nearly always the room, not a question.
-        if (heard.split(/\s+/).length < 3) return;
-        // A grace period, or she cancels herself on her own first syllable.
-        if (Date.now() - speakStartedRef.current < 1200) return;
-
-        cancelSpeech();
-        speakingRef.current = false;
-        busyRef.current = false;
-        setSpeaking(false);
-      }
+      /* No text-based echo filtering any more. On speakers the mic hears her
+         and the caller mixed together, her voice dominates, and comparing
+         words threw the caller's interruption away as echo. Interrupting is
+         now detected acoustically in lib/bargein.ts, on an echo-cancelled
+         stream. While she is still speaking, ignore recognition entirely. */
+      if (speakingRef.current) return;
 
       /* Chrome only emits a final result after a long pause of its own
          choosing. Rather than wait through it, treat the words going quiet
@@ -325,14 +346,14 @@ export default function VoiceDemo() {
       setListening(false);
       /* Android Chrome ends recognition on its own after a pause. In a real
          call that is not the end of the conversation, so pick it straight
-         back up — unless she is talking, or the caller switched it off. */
+         back up â€” unless she is talking, or the caller switched it off. */
       if (handsFreeRef.current && callLiveRef.current) {
         window.setTimeout(() => beginListeningRef.current(), 250);
       }
     };
     rec.onerror = (e: SpeechRecognitionErrorEvent) => {
       setListening(false);
-      // "no-speech" just means they said nothing — not worth a message.
+      // "no-speech" just means they said nothing â€” not worth a message.
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         handsFreeRef.current = false; // stop retrying against a wall
         setMicError(site.demo.micBlocked);
@@ -362,13 +383,15 @@ export default function VoiceDemo() {
     try {
       rec.start();
     } catch {
-      // Already running — harmless, and not worth telling the caller about.
+      // Already running â€” harmless, and not worth telling the caller about.
       setListening(false);
     }
   }, [language, send]);
 
   // Kept in a ref so the speech callbacks above can call the latest version.
-  beginListeningRef.current = beginListening;
+  useEffect(() => {
+    beginListeningRef.current = beginListening;
+  }, [beginListening]);
 
   /* The mic button is now only a manual override: tap to interrupt her, or to
      switch hands-free back on if you turned it off. */
@@ -416,7 +439,7 @@ export default function VoiceDemo() {
                 }}
                 className="h-[38px] rounded-full border-[0.8px] border-[color:var(--color-line-strong)] bg-transparent px-4 text-[0.82rem] text-[color:var(--color-muted)] outline-none"
               >
-                <option value="">More…</option>
+                <option value="">Moreâ€¦</option>
                 {OTHER_LANGUAGES.map((l) => (
                   <option key={l.code} value={l.code} className="bg-[#222]">
                     {l.native}
@@ -447,24 +470,24 @@ export default function VoiceDemo() {
                   {persona.business}
                 </p>
                 <p className="mt-0.5 text-[0.72rem] text-[color:var(--color-muted)]">
-                  {persona.location} ·{" "}
+                  {persona.location} Â·{" "}
                   {state === "live"
                     ? speaking
                       ? `${persona.agentName} is speaking`
                       : thinking
-                        ? "…"
+                        ? "â€¦"
                         : listening
-                          ? "Listening — just talk"
+                          ? "Listening â€” just talk"
                           : "Connected"
                     : state === "connecting"
-                      ? "Ringing…"
+                      ? "Ringingâ€¦"
                       : state === "ended"
                         ? site.demo.endedLabel
                         : getLanguage(language).native}
                 </p>
               </div>
 
-              {/* Transcript — inside the handset, like live captions */}
+              {/* Transcript â€” inside the handset, like live captions */}
               <div
                 ref={transcriptRef}
                 className="flex-1 space-y-2.5 overflow-y-auto py-4"
@@ -481,10 +504,15 @@ export default function VoiceDemo() {
                   </div>
                 )}
 
-                {/* VOICE MODE — a call screen, not a chat log. */}
+                {/* VOICE MODE â€” a call screen, not a chat log. */}
                 {state !== "idle" && mode === "voice" && (
                   <div className="flex h-full flex-col items-center justify-center text-center">
-                    <div
+                    {/* Tapping her cuts her off. The acoustic detector should
+                        catch you talking over her, but this always works. */}
+                    <button
+                      onClick={interrupt}
+                      disabled={!speaking}
+                      aria-label={speaking ? "Tap to interrupt" : persona.agentName}
                       className={`flex h-24 w-24 items-center justify-center rounded-full border-[0.8px] transition-colors ${
                         speaking
                           ? "border-[color:var(--color-accent-line)] bg-[color:var(--color-accent-soft)]"
@@ -496,18 +524,18 @@ export default function VoiceDemo() {
                       <span className="text-[2.6rem]" aria-hidden="true">
                         {persona.emoji}
                       </span>
-                    </div>
+                    </button>
 
                     <p className="mt-6 font-[family-name:var(--font-display)] text-[1.3rem] text-[color:var(--color-text)]">
                       {persona.agentName}
                     </p>
                     <p className="mt-1.5 text-[0.85rem] text-[color:var(--color-muted)]">
                       {speaking
-                        ? "Speaking…"
+                        ? "Speakingâ€¦ talk over her, or tap to stop"
                         : thinking
-                          ? "…"
+                          ? "â€¦"
                           : listening
-                            ? "Listening — just talk"
+                            ? "Listening â€” just talk"
                             : "Connected"}
                     </p>
 
@@ -519,14 +547,14 @@ export default function VoiceDemo() {
                   </div>
                 )}
 
-                {/* TEXT MODE — the full transcript. */}
+                {/* TEXT MODE â€” the full transcript. */}
                 {mode === "text" &&
                   turns.map((t, i) => <Bubble key={i} role={t.role} text={t.text} />)}
 
                 {mode === "text" && thinking && (
                   <div className="flex justify-start">
                     <span className="rounded-2xl rounded-bl-sm bg-[color:var(--color-raised)] px-4 py-2.5 text-[0.9rem] text-[color:var(--color-muted)]">
-                      <span className="animate-caret">▊</span>
+                      <span className="animate-caret">â–Š</span>
                     </span>
                   </div>
                 )}
@@ -546,11 +574,11 @@ export default function VoiceDemo() {
 
                 {state === "connecting" && (
                   <p className="py-4 text-center text-[0.85rem] text-[color:var(--color-muted)]">
-                    Ringing…
+                    Ringingâ€¦
                   </p>
                 )}
 
-                {/* VOICE MODE controls — hang up, and a quiet way out to
+                {/* VOICE MODE controls â€” hang up, and a quiet way out to
                     typing. Nothing else on screen during a call. */}
                 {state === "live" && mode === "voice" && (
                   <div className="space-y-3">
@@ -677,33 +705,6 @@ export default function VoiceDemo() {
       </div>
     </section>
   );
-}
-
-/**
- * Is this the receptionist's own voice coming back through the microphone?
- *
- * With the mic open during playback it hears both people. Comparing what was
- * heard against what she is currently saying separates the two: mostly her
- * words means echo, anything else means the caller is talking over her.
- *
- * Word overlap rather than exact matching, because recognition mangles the
- * tail of a sentence and rarely returns it verbatim.
- */
-function isEcho(heard: string, spoken: string): boolean {
-  if (!spoken) return false;
-  const words = (s: string) =>
-    s
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}\s]/gu, "")
-      .split(/\s+/)
-      .filter(Boolean);
-
-  const h = words(heard);
-  if (!h.length) return true;
-
-  const hers = new Set(words(spoken));
-  const shared = h.filter((w) => hers.has(w)).length;
-  return shared / h.length > 0.5;
 }
 
 /* ------------------------------------------------------------------ bits */
